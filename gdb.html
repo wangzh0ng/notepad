@@ -12,3 +12,86 @@ x ： 按十六进制格式显示内存数据，其中x/{字节数}x 以16进制
 {字节数}表示字节数制定（b 单字节；h 双字节；w 四字节；g 八字节；默认为四字节
 
 用vmmap这个指令可以看到段可读写情况
+
+
+ile 路径　　附加文件
+
+r   　　　　开始执行
+
+c              继续执行
+
+step          单步步入
+
+next          单步步过
+
+b *地址　　下断点
+
+enable       激活断点
+
+disable      禁用断点
+
+info b        查看断点
+
+del num     删除断点
+
+x/wx $esp 　　以4字节16进制显示栈中内容
+
+stack 100　　  插件提供的，显示栈中100项
+
+ find xxx　　   快速查找，很实用
+
+s 按字符串输出
+
+x 按十六进制格式显示变量。
+d 按十进制格式显示变量。
+u 按十六进制格式显示无符号整型。
+o 按八进制格式显示变量。
+t 按二进制格式显示变量。
+a 按十六进制格式显示变量。
+c 按字符格式显示变量。
+f 按浮点数格式显示变量。
+
+x/<n/f/u> <addr>
+
+n、f、u是可选的参数。
+
+b表示单字节，h表示双字节，w表示四字 节，g表示八字节
+
+但是实际的组合就那么几种：
+
+x/s 地址　　查看字符串
+
+x/wx 地址　　查看DWORD
+
+x/c 地址　　单字节查看
+
+x/16x $esp+12 查看寄存器偏移 
+
+set args 可指定运行时参数。（如：set args 10 20 30 40 50） 
+show args 命令可以查看设置好的运行参数。 
+
+
+peda的教程
+
+增强gdb的显示：在调试过程中着色并显示反汇编代码，寄存器和内存信息。
+添加命令以支持调试和利用开发（有关命令使用的完整列表peda help）：
+aslr - 显示/设置GDB的ASLR设置
+checksec - 检查二进制文件的各种安全选项
+dumpargs - 在呼叫指令处停止时显示传递给函数的参数
+dumprop - 将特定内存范围内的所有ROP小工具转储
+elfheader - 从被调试的ELF文件中获取标题信息
+elfsymbol - 从ELF文件获取非调试符号信息
+lookup - 搜索所有地址/参考地址属于一个内存范围
+patch - 修补程序内存以string / hexstring / int的地址开始
+pattern - 生成，搜索或写入循环模式到内存
+procinfo - 显示/ proc / pid /
+pshow - 显示各种PEDA选项和其他设置
+pset - 设置各种PEDA选项和其他设置
+readelf - 从ELF文件获取标题信息
+ropgadget - 获取二进制或库的通用ROP小工具
+ropsearch - 在内存中搜索ROP小工具
+searchmem|find - 在内存中搜索模式; 支持正则表达式搜索//查找用，例如searchmem“/ bin / sh”libc
+shellcode - 生成或下载常用的shellcode。
+skeleton - 生成python漏洞利用代码模板
+vmmap -- Get virtual mapping address ranges of section(s) in debugged process  //可以用来查看栈、bss段是否可以执行
+xormem - 用一个键异或存储区域
