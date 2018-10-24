@@ -48,7 +48,12 @@ content = p.recvuntil('GET YOUR ', drop=True)
 p.sendafter('AGE:\n\n', age)
 p.sendline('Y',timeout=1)
 r.recvuntil('\n')
+r.recv(numb = 2048, timeout = dufault)  接受数据，numb指定接收的字节，timeout指定超时
+r.recvline(keepends=True)  接受一行数据，keepends为是否保留行尾的\n
+r.recvall()  一直接收直到EOF
+r.recvrepeat(timeout = default)  持续接受直到EOF或timeout
 r.sendline(payload)
+r.interactive()  直接进行交互，相当于回到shell的模式，在取得shell之后使用
 info = r.recv().splitlines()[1]
 
 asm("xor eax,eax")
@@ -64,3 +69,15 @@ hex(e.address)  # 文件装载的基地址
 hex(e.symbols['write']) # 函数地址
 hex(e.got['write']) # GOT表的地址
 hex(e.plt['write']) # PLT的地址
+
+Shellcode生成器
+print shellcraft.i386.nop().strip('\n')
+print shellcraft.i386.linux.sh()
+
+ROP链生成器
+elf = ELF('ropasaurusrex') 
+rop = ROP(elf) 
+rop.read(0, elf.bss(0x80)) 
+rop.dump() 
+str(rop)
+
