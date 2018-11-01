@@ -81,3 +81,5 @@ rop.read(0, elf.bss(0x80))
 rop.dump() 
 str(rop)
 
+fmtstr_payload(offset,{key:value}) 用来生成格式化字符串漏洞写内存的payload.offset偏移，往key的地址，写入value的值
+
