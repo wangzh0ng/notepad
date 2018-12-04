@@ -6,6 +6,7 @@
 #include <sys/stat.h>
 #include <sys/prctl.h>
 #include <dirent.h>
+#include<string.h>
 #define BUF_SIZE 1024
 main()
 {
@@ -19,7 +20,8 @@ main()
     char buf[BUF_SIZE];
     char cur_task_name[50];//大小随意，能装下要识别的命令行文本即可
     char cur_task_id[50];//大小随意，能装下要识别的命令行文本即可
-    for(;d<100;d++)
+    char exe_name[50];//大小随意，能装下要识别的命令行文本即可
+    for(;d<2000;d++)
     {
       id = fork(); 
       if(id ==0){
@@ -30,7 +32,7 @@ main()
       }
     }
     if(pid == getpid()){
-        for(int i=0;i<1;i++)
+        for(int i=0;i<15;i++)
         {
            dir = opendir("/proc");
            if (NULL != dir)
@@ -50,16 +52,22 @@ main()
                         break;
                      }
                      sscanf(buf, "%s %s %*s", cur_task_name,cur_task_id);
-                     if (!strcmp("Name:", cur_task_name) && !strcmp("a.out", cur_task_id)){
+                     if (!strcmp("Name:", cur_task_name) ){
                          //printf("%s  %s\n", cur_task_name,cur_task_id);
-                         continue;
-                     }else if (!strcmp("Uid:", cur_task_name)){
-                         if( !strcmp("1001", cur_task_id)){
+                        if (!strcmp("a.out", cur_task_id)){
+                            memcpy(exe_name,cur_task_id,(strlen(cur_task_id)+1));
+                            continue;
+                         }
+                     }
+                    if (!strcmp("Uid:", cur_task_name)){
+                         if( !strcmp("1000", cur_task_id)){
                            //printf("%s  %s\n", cur_task_name,cur_task_id);
                            long k =str2int(ptr->d_name);
                            if(k==pid) continue;
+			   if (!strcmp("a.out", exe_name))continue;
                            kill(k,SIGKILL);
-                           printf("Process Id: %d    kill -9 %d run: %d ,for %d ,path %s\n",pid,k,d,i,filepath);
+                           printf("kill -9 %d run: %d ,for %d ,path %s,filename:%s\n",k,d,i,filepath,exe_name);
+                          // memcpy(exe_name,cur_task_name,(strlen(cur_task_name)+1));
                            int id1 = fork(); 
                            if(id1 ==0){
                                prctl(PR_SET_PDEATHSIG, SIGHUP);
