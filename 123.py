@@ -4,8 +4,9 @@ __author__ = 'wzh'
 
 import requests,os, re, time, ssl
 from urllib import parse
-import base64
-import urllib3
+import base64,uuid
+import urllib3,datetime
+import threading,traceback,sys
 
 urllib3.disable_warnings() #不显示警告信息
 ssl._create_default_https_context = ssl._create_unverified_context
@@ -14,12 +15,43 @@ req = requests.Session()
 proxy_dict = {
     "https": "https://127.0.0.1:8088"
 }
-class Ding_12306(object):
+
+def difftime(t):
+    tt =datetime.datetime.now()-t
+    return float("%.4f"%float("%d.%d"%(tt.seconds,tt.microseconds)))
+
+class runScriptThread(threading.Thread):
+    def __init__(self, funcName,*args):
+        threading.Thread.__init__(self)
+        self.args = args
+        self.funcName = funcName
+
+    def run(self):
+        try:
+            if len(self.args) == 0:
+                self.funcName()
+            else:
+                self.funcName(*(self.args))
+        except Exception as e:
+            errorstr=''.join(traceback.format_exception(*(sys.exc_info())))
+            print(time.strftime('%Y-%m-%d %H:%M:%S'),errorstr)
+            raise
+
+class Ticket_12306(object):
     def __init__(self,username,password):
         self.username = username
         self.password = password
         self.seat = { '无座':26, '硬卧':28 , '硬座':29, '二等座':30, '一等座':31}
+        self.seat_dict = {'无座': '1', '硬座': '1', '硬卧': '3', '软卧': '4', '高级软卧': '6', '动卧': 'F', '二等座': 'O', '一等座': 'M',
+                     '商务座': '9'}
         self.loginFlag = False
+
+    def setNoLogin(self):
+        self.loginFlag = False
+
+    def checkAuth(self):
+        if self.loginFlag == True:
+            self.auth()
 
     def set_station(self,from_station,to_station,date,trainNo):
         self.from_station=from_station
@@ -69,16 +101,17 @@ class Ding_12306(object):
 
         #print(html.text)
         html_pic = html.json()
+        filename = "img/%s.jpg" % uuid.uuid4()
         if html_pic['result_code'] == "0":
-            open('D:\\Program Files (x86)\\12306ai\\img\\pic.jpg', 'wb').write(base64.b64decode(html_pic["image"]))
+            open('C:\\12306\\github\\12306-Captcha-Crack\\'+filename, 'wb').write(base64.b64decode(html_pic["image"]))
         else:
-            print('验证码有误！')
+            print('验证码有误！',num)
             if num > 3:
                 exit()
             return self.pass_captcha(num + 1)
 
         try:
-            result = requests.get(url_captcha + "img/pic.jpg", verify=False).text
+            result = requests.get(url_captcha + filename, verify=False).text
             print(num,'验证码：',result)
             if result.index(',') == -1:
                 print('未别验证码！')
@@ -114,6 +147,7 @@ class Ding_12306(object):
             return False
 
     def login(self):
+        self.checklogin = datetime.datetime.now()
         scuess = True
         url_login = 'https://kyfw.12306.cn/passport/web/login'
         headers = {
@@ -149,7 +183,12 @@ class Ding_12306(object):
     def query(self):
         '''余票查询'''
         #     https://kyfw.12306.cn/otn/leftTicket/queryA?leftTicketDTO.train_date=2019-01-01&leftTicketDTO.from_station=RTQ&leftTicketDTO.to_station=CSQ&purpose_codes=ADULT
-        url = 'https://kyfw.12306.cn/otn/leftTicket/queryA?leftTicketDTO.train_date={}&leftTicketDTO.from_station={}&leftTicketDTO.to_station={}&purpose_codes=ADULT'.format(
+        hour = int(time.strftime('%H'))
+        if hour >= 23 or hour<6:
+            url ='https://kyfw.12306.cn/otn/leftTicket/queryZ'
+        else:
+            url ='https://kyfw.12306.cn/otn/leftTicket/queryA'
+        url = url +'?leftTicketDTO.train_date={}&leftTicketDTO.from_station={}&leftTicketDTO.to_station={}&purpose_codes=ADULT'.format(
             self.date, self.fromstation, self.tostation)
         headers = {
             'Host': 'kyfw.12306.cn',
@@ -195,7 +234,7 @@ class Ding_12306(object):
                         for seatNo in self.trainNo[info[3]]:
                             No = self.seat[seatNo]
                             if  info[No] != '无' and info[No]  != '':
-                                self.order(info[0] )
+                                #self.order(info[0] )
                                 print('订订订订订订订订订订订')
                     elif info[1] == '预订':
                         print(str(num) + '.' + info[3] + '车次暂时没有余票')
@@ -249,7 +288,189 @@ class Ding_12306(object):
             print('uamclient验证失败!')
             exit()
 
-    def order(self, result, train_number, from_station, to_station, date,secretStr):
+    def orderTicket(self,secretStr):
+        if self.loginFlag == False:
+            self.login()
+        self.order(secretStr)
+        content = self.price()
+        passengers = self.passengers(content[8])  # 打印乘客信息
+        # 选择乘客和座位
+        pass_info = self.chooseseat(passengers, content[8])
+        # 查看余票数
+        self.leftticket(content[0], content[1], content[2], pass_info[2], content[3], content[4], content[5],
+                         content[6],
+                         content[7], content[8])
+
+        # 最终确认订单
+        self.confirm(pass_info[0], pass_info[1], content[9], content[5], content[6], content[7], content[8])
+
+    def confirm(self, passengerTicketStr, oldpassengerStr, key_check_isChange, leftTicket, purpose_codes,
+                train_location, token):
+        '''最终确认订单'''
+        form = {
+            'passengerTicketStr': passengerTicketStr,
+            'oldPassengerStr': oldpassengerStr,
+            'randCode': '',
+            'key_check_isChange': key_check_isChange,
+            'choose_seats': '',
+            'seatDetailType': '000',
+            'leftTicketStr': leftTicket,
+            'purpose_codes': purpose_codes,
+            'train_location': train_location,
+            '_json_att': '',
+            'whatsSelect': '1',
+            'roomType': '00',
+            'dwAll': 'N',
+            'REPEAT_SUBMIT_TOKEN': token
+        }
+        global req
+        html_confirm = req.post(self.url_confirm, data=form, headers=self.head_2, verify=False).json()
+        print(html_confirm)
+        if html_confirm['status'] == True:
+            print('确认购票成功!')
+        else:
+            print('确认购票失败!')
+            exit()
+
+    def passengers(self, token):
+        '''打印乘客信息'''
+        # 确认乘客信息
+        form = {
+            '_json_att': '',
+            'REPEAT_SUBMIT_TOKEN': token
+        }
+        global req
+        html_pass = req.post(self.url_pass, data=form, headers=self.head_1, verify=False).json()
+        passengers = html_pass['data']['normal_passengers']
+        print('\n')
+        print('乘客信息列表:')
+        for i in passengers:
+            print(str(int(i['index_id']) + 1) + '号:' + i['passenger_name'] + ' ', end='')
+        print('\n')
+        return passengers
+
+    def chooseseat(self, passengers, passengers_name, choose_seat, token):
+        '''选择乘客和座位'''
+        seat_dict = {'无座': '1', '硬座': '1', '硬卧': '3', '软卧': '4', '高级软卧': '6', '动卧': 'F', '二等座': 'O', '一等座': 'M',
+                     '商务座': '9'}
+        choose_type = seat_dict[choose_seat]
+        pass_num = len(self.user)  # 购买的乘客数
+        pass_dict = []
+        for i in self.user:
+            info = None
+            for j in  passengers:
+                if j['passenger_id_no']==i:
+                    info = j
+                    break
+            if info == None:
+                print('用户不存在：',i)
+                continue
+            pass_name = info['passenger_name']  # 名字
+            pass_id = info['passenger_id_no']  # 身份证号
+            pass_phone = info['mobile_no']  # 手机号码
+            pass_type = info['passenger_type']  # 证件类型
+            dict = {
+                'choose_type': choose_type,
+                'pass_name': pass_name,
+                'pass_id': pass_id,
+                'pass_phone': pass_phone,
+                'pass_type': pass_type
+            }
+            pass_dict.append(dict)
+
+        num = 0
+        TicketStr_list = []
+        for i in pass_dict:
+            if pass_num == 1:
+                TicketStr = i['choose_type'] + ',0,1,' + i['pass_name'] + ',' + i['pass_type'] + ',' + i[
+                    'pass_id'] + ',' + i['pass_phone'] + ',N'
+                TicketStr_list.append(TicketStr)
+            elif num == 0:
+                TicketStr = i['choose_type'] + ',0,1,' + i['pass_name'] + ',' + i['pass_type'] + ',' + i[
+                    'pass_id'] + ',' + i['pass_phone'] + ','
+                TicketStr_list.append(TicketStr)
+            elif num == pass_num - 1:
+                TicketStr = 'N_' + i['choose_type'] + ',0,1,' + i['pass_name'] + ',' + i['pass_type'] + ',' + i[
+                    'pass_id'] + ',' + i['pass_phone'] + ',N'
+                TicketStr_list.append(TicketStr)
+            else:
+                TicketStr = 'N_' + i['choose_type'] + ',0,1,' + i['pass_name'] + ',' + i['pass_type'] + ',' + i[
+                    'pass_id'] + ',' + i['pass_phone'] + ','
+                TicketStr_list.append(TicketStr)
+            num += 1
+
+        passengerTicketStr = ''.join(TicketStr_list)
+        print(passengerTicketStr)
+
+        num = 0
+        passengrStr_list = []
+        for i in pass_dict:
+            if pass_num == 1:
+                passengerStr = i['pass_name'] + ',' + i['pass_type'] + ',' + i['pass_id'] + ',1_'
+                passengrStr_list.append(passengerStr)
+            elif num == 0:
+                passengerStr = i['pass_name'] + ',' + i['pass_type'] + ',' + i['pass_id'] + ','
+                passengrStr_list.append(passengerStr)
+            elif num == pass_num - 1:
+                passengerStr = '1_' + i['pass_name'] + ',' + i['pass_type'] + ',' + i['pass_id'] + ',1_'
+                passengrStr_list.append(passengerStr)
+            else:
+                passengerStr = '1_' + i['pass_name'] + ',' + i['pass_type'] + ',' + i['pass_id'] + ','
+                passengrStr_list.append(passengerStr)
+            num += 1
+
+        oldpassengerStr = ''.join(passengrStr_list)
+        print(oldpassengerStr)
+        form = {
+            'cancel_flag': '2',
+            'bed_level_order_num': '000000000000000000000000000000',
+            'passengerTicketStr': passengerTicketStr,
+            'oldPassengerStr': oldpassengerStr,
+            'tour_flag': 'dc',
+            'randCode': '',
+            'whatsSelect': '1',
+            '_json_att': '',
+            'REPEAT_SUBMIT_TOKEN': token
+        }
+        global req
+        html_checkorder = req.post(self.url_checkorder, data=form, headers=self.head_2, verify=False).json()
+        print(html_checkorder)
+        if html_checkorder['status'] == True:
+            print('检查订单信息成功!')
+        else:
+            print('检查订单信息失败!')
+            exit()
+
+        return passengerTicketStr, oldpassengerStr, choose_type
+
+    def leftticket(self, train_date, train_no, stationTrainCode, choose_type, fromStationTelecode, toStationTelecode,
+                   leftTicket, purpose_codes, train_location, token):
+        '''查看余票数量'''
+        form = {
+            'train_date': train_date,
+            'train_no': train_no,
+            'stationTrainCode': stationTrainCode,
+            'seatType': choose_type,
+            'fromStationTelecode': fromStationTelecode,
+            'toStationTelecode': toStationTelecode,
+            'leftTicket': leftTicket,
+            'purpose_codes': purpose_codes,
+            'train_location': train_location,
+            '_json_att': '',
+            'REPEAT_SUBMIT_TOKEN': token
+        }
+        global req
+        html_count = req.post(self.url_count, data=form, headers=self.head_2, verify=False).json()
+        print(html_count)
+        if html_count['status'] == True:
+            print('查看余票数量成功!')
+            count = html_count['data']['ticket']
+            print('此座位类型还有余票' + count + '张~')
+        else:
+            print('查看余票数量失败!')
+            exit()
+
+    def order(self,secretStr):
         '''提交订单'''
         url_order = 'https://kyfw.12306.cn/otn/leftTicket/submitOrderRequest'
         head_1 = {
@@ -277,14 +498,85 @@ class Ding_12306(object):
             print('提交订单失败!')
             exit()
 
+    def set_user(self, user):
+        self.user = user
+
+    def price(self):
+        '''打印票价信息'''
+        form = {
+            '_json_att': ''
+        }
+        global req
+        head_1 = {
+            'Host': 'kyfw.12306.cn',
+            'Referer': 'https://kyfw.12306.cn/otn/leftTicket/init',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 6.1; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/55.0.2883.87 Safari/537.36',
+        }
+        url_token = 'https://kyfw.12306.cn/otn/confirmPassenger/initDc'
+        html_token = req.post(url_token, data=form, headers=head_1, verify=False).text
+        token = re.findall(r"var globalRepeatSubmitToken = '(.*?)';", html_token)[0]
+        leftTicket = re.findall(r"'leftTicketStr':'(.*?)',", html_token)[0]
+        key_check_isChange = re.findall(r"'key_check_isChange':'(.*?)',", html_token)[0]
+        train_no = re.findall(r"'train_no':'(.*?)',", html_token)[0]
+        stationTrainCode = re.findall(r"'station_train_code':'(.*?)',", html_token)[0]
+        fromStationTelecode = re.findall(r"'from_station_telecode':'(.*?)',", html_token)[0]
+        toStationTelecode = re.findall(r"'to_station_telecode':'(.*?)',", html_token)[0]
+        date_temp = re.findall(r"'to_station_no':'.*?','train_date':'(.*?)',", html_token)[0]
+        timeArray = time.strptime(date_temp, "%Y%m%d")
+        timeStamp = int(time.mktime(timeArray))
+        time_local = time.localtime(timeStamp)
+        train_date_temp = time.strftime("%a %b %d %Y %H:%M:%S", time_local)
+        train_date = train_date_temp + ' GMT+0800 (中国标准时间)'
+        train_location = re.findall(r"tour_flag':'.*?','train_location':'(.*?)'", html_token)[0]
+        purpose_codes = re.findall(r"'purpose_codes':'(.*?)',", html_token)[0]
+        print('token值:' + token)
+        print('leftTicket值:' + leftTicket)
+        print('key_check_isChange值:' + key_check_isChange)
+        print('train_no值:' + train_no)
+        print('stationTrainCode值:' + stationTrainCode)
+        print('fromStationTelecode值:' + fromStationTelecode)
+        print('toStationTelecode值:' + toStationTelecode)
+        print('train_date值:' + train_date)
+        print('train_location值:' + train_location)
+        print('purpose_codes值:' + purpose_codes)
+        price_list = re.findall(r"'leftDetails':(.*?),'leftTicketStr", html_token)[0]
+        # price = price_list[1:-1].replace('\'', '').split(',')
+        print('票价:')
+        for i in eval(price_list):
+            # p = i.encode('latin-1').decode('unicode_escape')
+            print(i + ' | ', end='')
+        return train_date, train_no, stationTrainCode, fromStationTelecode, toStationTelecode, leftTicket, purpose_codes, train_location, token, key_check_isChange
+
 
 
 if __name__ == '__main__':
     print('*' * 30 + '12306购票' + '*' * 30)
-    d12306 = Ding_12306('13786169829','ledong429')
-    d12306.set_station('东莞','长沙','2019-01-02',{'K9064':['硬座'],'K9076':['硬卧']})
-    d12306.query()
-    #d12306.login()
+    t12306 = Ticket_12306('13786169829','ledong429')
+    t12306.set_station('东莞','长沙','2019-01-02',{'K9064':['硬座'],'K9076':['硬卧']})
+    t12306.set_user(['430423198204290015'])#'E95165810'
+    checkauth = datetime.datetime.now()
+    checklogin = datetime.datetime.now() - datetime.timedelta(hours=7)
+    while True:
+        hour = int(time.strftime('%H'))
+        '''if hour>=23 or hour <6:
+            time.sleep(1)
+            d12306.setNoLogin()
+            continue'''
+        t = runScriptThread(t12306.query)
+        t.start()
+        if difftime(checkauth)>3*60:
+            checkauth = datetime.datetime.now()
+            t = runScriptThread(t12306.checkAuth)
+            t.start()
+        if difftime(checklogin)>6*60:
+            checklogin = datetime.datetime.now()
+            checkauth = datetime.datetime.now()
+            t = runScriptThread(t12306.login)
+            t.start()
+
+        time.sleep(100000)
+    #d12306.query()
+
 
 
 
