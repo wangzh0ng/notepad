@@ -45,6 +45,10 @@ class Ticket_12306(object):
         self.seat_dict = {'无座': '1', '硬座': '1', '硬卧': '3', '软卧': '4', '高级软卧': '6', '动卧': 'F', '二等座': 'O', '一等座': 'M',
                      '商务座': '9'}
         self.loginFlag = False
+        self.BaseUrl='https://kyfw.12306.cn/otn'
+        self.quryUrl ='leftTicket/queryZ'
+        self.ThreadLock = threading.Lock()
+        self.stopqury = False
 
     def setNoLogin(self):
         self.loginFlag = False
@@ -53,14 +57,14 @@ class Ticket_12306(object):
         if self.loginFlag == True:
             self.auth()
 
-    def set_station(self,from_station,to_station,date,trainNo):
+    def set_station(self,from_station,to_station,date,trainNo,trainSeat):
         self.from_station=from_station
         self.to_station = to_station
         self.date = date
         self.trainNo = trainNo
-        self.trainKey = trainNo.keys()
+        self.trainSeat = trainSeat
         self.fromstation,self.tostation = self.station_name(from_station,to_station)
-        print('Date : %s  From %s(%s) To %s(%s)  '%(date, from_station,self.fromstation, to_station, self.tostation))
+        print('Date : %s  From %s(%s) To %s(%s)  '%(date, from_station,self.fromstation, to_station, self.tostation),trainNo,trainSeat)
 
     def station_name(self, from_station,to_station):
         '''获取车站简拼'''
@@ -103,7 +107,7 @@ class Ticket_12306(object):
         html_pic = html.json()
         filename = "img/%s.jpg" % uuid.uuid4()
         if html_pic['result_code'] == "0":
-            open('C:\\12306\\github\\12306-Captcha-Crack\\'+filename, 'wb').write(base64.b64decode(html_pic["image"]))
+            open('D:\\Program Files (x86)\\12306ai\\'+filename, 'wb').write(base64.b64decode(html_pic["image"]))
         else:
             print('验证码有误！',num)
             if num > 3:
@@ -146,49 +150,64 @@ class Ticket_12306(object):
             print('验证码校验失败!',answer)
             return False
 
+    def loginAuth(self):
+        self.login()
+        self.auth()
+
     def login(self):
-        self.checklogin = datetime.datetime.now()
-        scuess = True
-        url_login = 'https://kyfw.12306.cn/passport/web/login'
-        headers = {
-            'Host': 'kyfw.12306.cn',
-            'Referer': 'https://kyfw.12306.cn/otn/login/init',
-            'User-Agent': 'Mozilla/5.0 (Windows NT 6.1; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/55.0.2883.87 Safari/537.36',
-        }
-        for x in range(3):
-            answer_num = self.pass_captcha()
-            scuess = self.captcha(answer_num)
-            if scuess == True:
-                break
-        if scuess == False:
-            print('验证码校验失败三次!')
+        if self.ThreadLock.acquire(30):
+            try:
+                self.checklogin = datetime.datetime.now()
+                scuess = True
+                url_login = 'https://kyfw.12306.cn/passport/web/login'
+                headers = {
+                    'Host': 'kyfw.12306.cn',
+                    'Referer': 'https://kyfw.12306.cn/otn/login/init',
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 6.1; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/55.0.2883.87 Safari/537.36',
+                }
+                for x in range(3):
+                    answer_num = self.pass_captcha()
+                    scuess = self.captcha(answer_num)
+                    if scuess == True:
+                        break
+                if scuess == False:
+                    print('验证码校验失败三次!')
+                    exit()
+
+                '''登录账号'''
+                form_login = {
+                    'username': self.username,
+                    'password': self.password,
+                    'appid': 'otn'
+                }
+                global req
+                r = req.post(url_login, data=form_login, headers=headers, verify=False, proxies=proxy_dict)
+                if r.status_code != 200:
+                    req.cookies.clear()
+                    self.setNoLogin()
+                    print('登陆失败！返回代码：', r.status_code)
+                    return
+
+                html_login = r.json()
+                print(html_login)
+                if html_login['result_code'] == 0:
+                    self.loginFlag = True
+                    print('恭喜您,登录成功!')
+                else:
+                    print('账号密码错误,登录失败!')
+                    exit()
+            finally:
+                self.ThreadLock.release()
+        else:
             exit()
 
-        '''登录账号'''
-        form_login = {
-            'username': self.username,
-            'password': self.password,
-            'appid': 'otn'
-        }
-        global req
-        html_login = req.post(url_login, data=form_login, headers=headers, verify=False,proxies=proxy_dict).json()
-        print(html_login)
-        if html_login['result_code'] == 0:
-            self.loginFlag = True
-            print('恭喜您,登录成功!')
-        else:
-            print('账号密码错误,登录失败!')
-            exit()
 
     def query(self):
+        if self.stopqury==True:
+            exit()
         '''余票查询'''
         #     https://kyfw.12306.cn/otn/leftTicket/queryA?leftTicketDTO.train_date=2019-01-01&leftTicketDTO.from_station=RTQ&leftTicketDTO.to_station=CSQ&purpose_codes=ADULT
-        hour = int(time.strftime('%H'))
-        if hour >= 23 or hour<6:
-            url ='https://kyfw.12306.cn/otn/leftTicket/queryZ'
-        else:
-            url ='https://kyfw.12306.cn/otn/leftTicket/queryA'
-        url = url +'?leftTicketDTO.train_date={}&leftTicketDTO.from_station={}&leftTicketDTO.to_station={}&purpose_codes=ADULT'.format(
+        url = '{}/{}?leftTicketDTO.train_date={}&leftTicketDTO.from_station={}&leftTicketDTO.to_station={}&purpose_codes=ADULT'.format(self.BaseUrl,self.quryUrl,
             self.date, self.fromstation, self.tostation)
         headers = {
             'Host': 'kyfw.12306.cn',
@@ -199,10 +218,17 @@ class Ticket_12306(object):
             'X-Requested-With': 'XMLHttpRequest'
         }
         try:
-            r = requests.get(url, headers=headers, verify=False,proxies=proxy_dict)
-            if r.status_code != 200:
+
+            r = requests.get(url, headers=headers, allow_redirects=False,verify=False,proxies=proxy_dict)
+            if r.status_code != 200 and r.headers.get('Content-Type')!='application/json;charset=utf-8':
+                print(time.strftime('%Y-%m-%d %H:%M:%S'), '查询状态为：',r.status_code)
                 return
+            print(time.strftime('%Y-%m-%d %H:%M:%S'), '查询....')
             html = r.json()
+            if  html['status']==False:
+                if  'c_url' in html:
+                    self.quryUrl = html['c_url']
+                return
             result = html['data']['result']
             if result == []:
                 print('很抱歉,没有查到符合当前条件的列车!')
@@ -214,7 +240,7 @@ class Ticket_12306(object):
                 for i in result:
                     info = i.split('|')
                     if info[0] != '' and info[0] != 'null':
-                        if info[3] in self.trainKey:
+                        if info[3] in self.trainNo:
                             pass
                         else:
                             continue
@@ -222,8 +248,6 @@ class Ticket_12306(object):
                         print('出发时间:' + info[8] + ' 到达时间:' + info[9] + ' 历时多久:' + info[10] + ' ', end='')
                         seat = {21: '高级软卧', 23: '软卧', 26: '无座', 28: '硬卧', 29: '硬座', 30: '二等座', 31: '一等座', 32: '商务座',
                                 33: '动卧'}
-                        #from_station_no = info[16]
-                        #to_station_no = info[17]
                         for j in seat.keys():
                             if info[j] != '无' and info[j] != '':
                                 if info[j] == '有':
@@ -231,10 +255,11 @@ class Ticket_12306(object):
                                 else:
                                     print(seat[j] + ':有' + info[j] + '张票 ', end='')
                         print('\n')
-                        for seatNo in self.trainNo[info[3]]:
+                        for seatNo in self.trainSeat:
                             No = self.seat[seatNo]
                             if  info[No] != '无' and info[No]  != '':
-                                #self.order(info[0] )
+                                self.stopqury = True
+                                self.orderTicket(parse.unquote(info[0] ),self.seat_dict[seatNo])
                                 print('订订订订订订订订订订订')
                     elif info[1] == '预订':
                         print(str(num) + '.' + info[3] + '车次暂时没有余票')
@@ -246,9 +271,11 @@ class Ticket_12306(object):
                         print(str(num) + '.' + info[3] + '车次列车运行图调整,暂停发售')
                     num += 1
             return result
-        except Exception as err:
-            print(err)
+        except Exception as e:
             print('查询信息有误!请重新输入!')
+            errorstr = ''.join(traceback.format_exception(*(sys.exc_info())))
+            print(time.strftime('%Y-%m-%d %H:%M:%S'), errorstr)
+
             exit()
 
     def auth(self):
@@ -288,18 +315,16 @@ class Ticket_12306(object):
             print('uamclient验证失败!')
             exit()
 
-    def orderTicket(self,secretStr):
+    def orderTicket(self,secretStr,seatNo):
         if self.loginFlag == False:
-            self.login()
+            self.loginAuth()
         self.order(secretStr)
         content = self.price()
-        passengers = self.passengers(content[8])  # 打印乘客信息
+        #passengers = self.passengers(content[8])  # 打印乘客信息
+
         # 选择乘客和座位
-        pass_info = self.chooseseat(passengers, content[8])
-        # 查看余票数
-        self.leftticket(content[0], content[1], content[2], pass_info[2], content[3], content[4], content[5],
-                         content[6],
-                         content[7], content[8])
+        pass_info = self.chooseseat(content[8],seatNo)
+
 
         # 最终确认订单
         self.confirm(pass_info[0], pass_info[1], content[9], content[5], content[6], content[7], content[8])
@@ -324,51 +349,54 @@ class Ticket_12306(object):
             'REPEAT_SUBMIT_TOKEN': token
         }
         global req
-        html_confirm = req.post(self.url_confirm, data=form, headers=self.head_2, verify=False).json()
+        url_confirm = 'https://kyfw.12306.cn/otn/confirmPassenger/confirmSingleForQueue'
+        head_2 = {
+            'Host': 'kyfw.12306.cn',
+            'Referer': 'https://kyfw.12306.cn/otn/confirmPassenger/initDc',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 6.1; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/55.0.2883.87 Safari/537.36',
+        }
+        html_confirm = req.post(url_confirm, data=form, headers=head_2, verify=False,proxies=proxy_dict).json()
         print(html_confirm)
-        if html_confirm['status'] == True:
+        if html_confirm['status'] == True and html_confirm['data']['submitStatus']==True :
             print('确认购票成功!')
         else:
+            self.stopqury = False
             print('确认购票失败!')
             exit()
+
 
     def passengers(self, token):
         '''打印乘客信息'''
         # 确认乘客信息
+        url_pass = 'https://kyfw.12306.cn/otn/confirmPassenger/getPassengerDTOs'
+        head_1 = {
+            'Host': 'kyfw.12306.cn',
+            'Referer': 'https://kyfw.12306.cn/otn/view/passengers.html',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 6.1; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/55.0.2883.87 Safari/537.36',
+        }
         form = {
             '_json_att': '',
             'REPEAT_SUBMIT_TOKEN': token
         }
         global req
-        html_pass = req.post(self.url_pass, data=form, headers=self.head_1, verify=False).json()
+        html_pass = req.post(url_pass, data=form, headers=head_1,proxies=proxy_dict, verify=False).json()
         passengers = html_pass['data']['normal_passengers']
         print('\n')
         print('乘客信息列表:')
-        for i in passengers:
-            print(str(int(i['index_id']) + 1) + '号:' + i['passenger_name'] + ' ', end='')
-        print('\n')
+        #for i in passengers:
+        #    print(str(int(i['index_id']) + 1) + '号:' + i['passenger_name'] + ' ', end='')
+        #print('\n')
         return passengers
 
-    def chooseseat(self, passengers, passengers_name, choose_seat, token):
+    def chooseseat(self,token,choose_type):
         '''选择乘客和座位'''
-        seat_dict = {'无座': '1', '硬座': '1', '硬卧': '3', '软卧': '4', '高级软卧': '6', '动卧': 'F', '二等座': 'O', '一等座': 'M',
-                     '商务座': '9'}
-        choose_type = seat_dict[choose_seat]
         pass_num = len(self.user)  # 购买的乘客数
         pass_dict = []
-        for i in self.user:
-            info = None
-            for j in  passengers:
-                if j['passenger_id_no']==i:
-                    info = j
-                    break
-            if info == None:
-                print('用户不存在：',i)
-                continue
-            pass_name = info['passenger_name']  # 名字
-            pass_id = info['passenger_id_no']  # 身份证号
-            pass_phone = info['mobile_no']  # 手机号码
-            pass_type = info['passenger_type']  # 证件类型
+        for info in self.user:
+            pass_name = info['pass_name']  # 名字
+            pass_id = info['pass_id']  # 身份证号
+            pass_phone = info['pass_phone']  # 手机号码
+            pass_type = info['pass_type']  # 证件类型 儿童2，成人1
             dict = {
                 'choose_type': choose_type,
                 'pass_name': pass_name,
@@ -377,7 +405,6 @@ class Ticket_12306(object):
                 'pass_type': pass_type
             }
             pass_dict.append(dict)
-
         num = 0
         TicketStr_list = []
         for i in pass_dict:
@@ -433,7 +460,13 @@ class Ticket_12306(object):
             'REPEAT_SUBMIT_TOKEN': token
         }
         global req
-        html_checkorder = req.post(self.url_checkorder, data=form, headers=self.head_2, verify=False).json()
+        url_checkorder = 'https://kyfw.12306.cn/otn/confirmPassenger/checkOrderInfo'
+        head_2 = {
+            'Host': 'kyfw.12306.cn',
+            'Referer': 'https://kyfw.12306.cn/otn/confirmPassenger/initDc',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 6.1; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/55.0.2883.87 Safari/537.36',
+        }
+        html_checkorder = req.post(url_checkorder, data=form, headers=head_2,proxies=proxy_dict, verify=False).json()
         print(html_checkorder)
         if html_checkorder['status'] == True:
             print('检查订单信息成功!')
@@ -460,7 +493,13 @@ class Ticket_12306(object):
             'REPEAT_SUBMIT_TOKEN': token
         }
         global req
-        html_count = req.post(self.url_count, data=form, headers=self.head_2, verify=False).json()
+        head_2 = {
+            'Host': 'kyfw.12306.cn',
+            'Referer': 'https://kyfw.12306.cn/otn/confirmPassenger/initDc',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 6.1; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/55.0.2883.87 Safari/537.36',
+        }
+        url_count = 'https://kyfw.12306.cn/otn/confirmPassenger/getQueueCount'
+        html_count = req.post(url_count, data=form, headers=head_2,proxies=proxy_dict, verify=False).json()
         print(html_count)
         if html_count['status'] == True:
             print('查看余票数量成功!')
@@ -477,6 +516,7 @@ class Ticket_12306(object):
             'Host': 'kyfw.12306.cn',
             'Referer': 'https://kyfw.12306.cn/otn/leftTicket/init',
             'User-Agent': 'Mozilla/5.0 (Windows NT 6.1; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/55.0.2883.87 Safari/537.36',
+            'X-Requested-With': 'XMLHttpRequest'
         }
         back_train_date = time.strftime("%Y-%m-%d", time.localtime())
         form = {
@@ -513,7 +553,7 @@ class Ticket_12306(object):
             'User-Agent': 'Mozilla/5.0 (Windows NT 6.1; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/55.0.2883.87 Safari/537.36',
         }
         url_token = 'https://kyfw.12306.cn/otn/confirmPassenger/initDc'
-        html_token = req.post(url_token, data=form, headers=head_1, verify=False).text
+        html_token = req.post(url_token, data=form, headers=head_1,proxies=proxy_dict, verify=False).text
         token = re.findall(r"var globalRepeatSubmitToken = '(.*?)';", html_token)[0]
         leftTicket = re.findall(r"'leftTicketStr':'(.*?)',", html_token)[0]
         key_check_isChange = re.findall(r"'key_check_isChange':'(.*?)',", html_token)[0]
@@ -541,42 +581,45 @@ class Ticket_12306(object):
         print('purpose_codes值:' + purpose_codes)
         price_list = re.findall(r"'leftDetails':(.*?),'leftTicketStr", html_token)[0]
         # price = price_list[1:-1].replace('\'', '').split(',')
-        print('票价:')
-        for i in eval(price_list):
+        #print('票价:')
+        #for i in eval(price_list):
             # p = i.encode('latin-1').decode('unicode_escape')
-            print(i + ' | ', end='')
+        #    print(i + ' | ', end='')
         return train_date, train_no, stationTrainCode, fromStationTelecode, toStationTelecode, leftTicket, purpose_codes, train_location, token, key_check_isChange
-
 
 
 if __name__ == '__main__':
     print('*' * 30 + '12306购票' + '*' * 30)
-    t12306 = Ticket_12306('13786169829','ledong429')
-    t12306.set_station('东莞','长沙','2019-01-02',{'K9064':['硬座'],'K9076':['硬卧']})
-    t12306.set_user(['430423198204290015'])#'E95165810'
+    t12306 = Ticket_12306('13025114177','ledong429')
+    t12306.set_station('广州','衡阳','2019-01-27',['K9004','K9076'],['硬卧','二等座','硬座'])
+    # 无座  硬座  硬卧  软卧  高级软卧  动卧  二等座  一等座   商务座
+    pass_dict=[]
+    dict = {
+        'pass_name': '',#姓名
+        'pass_id': '',#证件号码
+        'pass_phone': '',#手机
+        'pass_type': '1'# 1成人，2儿童
+    }
+    pass_dict.append(dict)
+    t12306.set_user(pass_dict)  # '95165810'
     checkauth = datetime.datetime.now()
     checklogin = datetime.datetime.now() - datetime.timedelta(hours=7)
     while True:
         hour = int(time.strftime('%H'))
-        '''if hour>=23 or hour <6:
+        if hour>=23 or hour <6:
             time.sleep(1)
-            d12306.setNoLogin()
-            continue'''
+            t12306.setNoLogin()
+            continue
         t = runScriptThread(t12306.query)
         t.start()
-        if difftime(checkauth)>3*60:
+        if difftime(checklogin)>60*60:
+            checklogin = datetime.datetime.now()
+            checkauth = datetime.datetime.now()
+            t = runScriptThread(t12306.loginAuth)
+            t.start()
+        if difftime(checkauth)>3*60-1:
             checkauth = datetime.datetime.now()
             t = runScriptThread(t12306.checkAuth)
             t.start()
-        if difftime(checklogin)>6*60:
-            checklogin = datetime.datetime.now()
-            checkauth = datetime.datetime.now()
-            t = runScriptThread(t12306.login)
-            t.start()
-
-        time.sleep(100000)
+        time.sleep(10)
     #d12306.query()
-
-
-
-
