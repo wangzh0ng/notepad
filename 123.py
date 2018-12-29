@@ -1,6 +1,6 @@
 # !/user/bin/env python
 # -*- coding:utf-8 -*-
-__author__ = 'wzh'
+__author__ = 'w2h'
 
 import requests,os, re, time, ssl
 from urllib import parse
@@ -229,6 +229,7 @@ class Ticket_12306(object):
                 if  'c_url' in html:
                     self.quryUrl = html['c_url']
                 return
+            alltrain=[]
             result = html['data']['result']
             if result == []:
                 print('很抱歉,没有查到符合当前条件的列车!')
@@ -254,13 +255,12 @@ class Ticket_12306(object):
                                     print(seat[j] + ':有票 ', end='')
                                 else:
                                     print(seat[j] + ':有' + info[j] + '张票 ', end='')
+
                         print('\n')
                         for seatNo in self.trainSeat:
                             No = self.seat[seatNo]
-                            if  info[No] != '无' and info[No]  != '':
-                                self.stopqury = True
-                                self.orderTicket(parse.unquote(info[0] ),self.seat_dict[seatNo])
-                                print('订订订订订订订订订订订')
+                            if info[No] != '无' and info[No] != '':
+                                alltrain.append(info)
                     elif info[1] == '预订':
                         print(str(num) + '.' + info[3] + '车次暂时没有余票')
                     elif info[1] == '列车停运':
@@ -270,7 +270,15 @@ class Ticket_12306(object):
                     else:
                         print(str(num) + '.' + info[3] + '车次列车运行图调整,暂停发售')
                     num += 1
-            return result
+                for x in self.trainNo:
+                    for info in alltrain:
+                        if x == info[3]:
+                            for seatNo in self.trainSeat:
+                                No = self.seat[seatNo]
+                                if info[No] != '无' and info[No] != '':
+                                    self.stopqury = True
+                                    self.orderTicket(parse.unquote(info[0]), self.seat_dict[seatNo])
+
         except Exception as e:
             print('查询信息有误!请重新输入!')
             errorstr = ''.join(traceback.format_exception(*(sys.exc_info())))
@@ -359,6 +367,7 @@ class Ticket_12306(object):
         print(html_confirm)
         if html_confirm['status'] == True and html_confirm['data']['submitStatus']==True :
             print('确认购票成功!')
+            exit()
         else:
             self.stopqury = False
             print('确认购票失败!')
@@ -471,43 +480,11 @@ class Ticket_12306(object):
         if html_checkorder['status'] == True:
             print('检查订单信息成功!')
         else:
+            self.stopqury = False
             print('检查订单信息失败!')
             exit()
 
         return passengerTicketStr, oldpassengerStr, choose_type
-
-    def leftticket(self, train_date, train_no, stationTrainCode, choose_type, fromStationTelecode, toStationTelecode,
-                   leftTicket, purpose_codes, train_location, token):
-        '''查看余票数量'''
-        form = {
-            'train_date': train_date,
-            'train_no': train_no,
-            'stationTrainCode': stationTrainCode,
-            'seatType': choose_type,
-            'fromStationTelecode': fromStationTelecode,
-            'toStationTelecode': toStationTelecode,
-            'leftTicket': leftTicket,
-            'purpose_codes': purpose_codes,
-            'train_location': train_location,
-            '_json_att': '',
-            'REPEAT_SUBMIT_TOKEN': token
-        }
-        global req
-        head_2 = {
-            'Host': 'kyfw.12306.cn',
-            'Referer': 'https://kyfw.12306.cn/otn/confirmPassenger/initDc',
-            'User-Agent': 'Mozilla/5.0 (Windows NT 6.1; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/55.0.2883.87 Safari/537.36',
-        }
-        url_count = 'https://kyfw.12306.cn/otn/confirmPassenger/getQueueCount'
-        html_count = req.post(url_count, data=form, headers=head_2,proxies=proxy_dict, verify=False).json()
-        print(html_count)
-        if html_count['status'] == True:
-            print('查看余票数量成功!')
-            count = html_count['data']['ticket']
-            print('此座位类型还有余票' + count + '张~')
-        else:
-            print('查看余票数量失败!')
-            exit()
 
     def order(self,secretStr):
         '''提交订单'''
@@ -534,9 +511,12 @@ class Ticket_12306(object):
         print(html_order)
         if html_order['status'] == True:
             print('恭喜您,提交订单成功!')
+        elif '未完成订单' in  html_order['messages'][0]:
+            print('有未处理的订单，请您到[未完成订单]</a>进行处理!')
+            os._exit()
         else:
             print('提交订单失败!')
-            exit()
+            sys.exit()
 
     def set_user(self, user):
         self.user = user
@@ -569,22 +549,6 @@ class Ticket_12306(object):
         train_date = train_date_temp + ' GMT+0800 (中国标准时间)'
         train_location = re.findall(r"tour_flag':'.*?','train_location':'(.*?)'", html_token)[0]
         purpose_codes = re.findall(r"'purpose_codes':'(.*?)',", html_token)[0]
-        print('token值:' + token)
-        print('leftTicket值:' + leftTicket)
-        print('key_check_isChange值:' + key_check_isChange)
-        print('train_no值:' + train_no)
-        print('stationTrainCode值:' + stationTrainCode)
-        print('fromStationTelecode值:' + fromStationTelecode)
-        print('toStationTelecode值:' + toStationTelecode)
-        print('train_date值:' + train_date)
-        print('train_location值:' + train_location)
-        print('purpose_codes值:' + purpose_codes)
-        price_list = re.findall(r"'leftDetails':(.*?),'leftTicketStr", html_token)[0]
-        # price = price_list[1:-1].replace('\'', '').split(',')
-        #print('票价:')
-        #for i in eval(price_list):
-            # p = i.encode('latin-1').decode('unicode_escape')
-        #    print(i + ' | ', end='')
         return train_date, train_no, stationTrainCode, fromStationTelecode, toStationTelecode, leftTicket, purpose_codes, train_location, token, key_check_isChange
 
 
@@ -622,4 +586,3 @@ if __name__ == '__main__':
             t = runScriptThread(t12306.checkAuth)
             t.start()
         time.sleep(10)
-    #d12306.query()
